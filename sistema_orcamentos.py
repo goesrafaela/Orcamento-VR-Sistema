@@ -712,6 +712,16 @@ def tela_novo_orcamento():
     entrada_qtd.insert(0, "1")
     entrada_qtd.grid(row=0, column=3)
 
+    # ---------------------- CAMPOS DE PARCELAMENTO ----------------------
+    ttk.Label(frame_dados, text="Número de Parcelas:").grid(row=3, column=0, sticky="w", padx=5, pady=8)
+    entrada_parcelas = ttk.Entry(frame_dados, width=15)
+    entrada_parcelas.insert(0, "1")  # Padrão: à vista
+    entrada_parcelas.grid(row=3, column=1)
+
+    ttk.Label(frame_dados, text="Valor por Parcela:").grid(row=3, column=2, sticky="w", padx=15)
+    label_valor_parcela = ttk.Label(frame_dados, text="R$ 0,00", font=("Arial", 10, "bold"))
+    label_valor_parcela.grid(row=3, column=3)
+    # ----------------------------------------------------------------------
     lista_itens = []
     colunas = ("codigo", "descricao", "valor", "qtd", "total")
     tree = ttk.Treeview(frame_itens, columns=colunas, show="headings", height=7)
@@ -771,6 +781,8 @@ def tela_novo_orcamento():
     entrada_imp = ttk.Entry(frame_totais, width=12)
     entrada_imp.insert(0, "0,00")
     entrada_imp.grid(row=0, column=3)
+
+    
 
     def finalizar_orcamento():
         if not lista_itens or not combo_cliente.get():
