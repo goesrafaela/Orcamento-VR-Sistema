@@ -1,48 +1,48 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import cm
 import os
 
-# ---------------------- CONFIGURAÇÕES DA EMPRESA ----------------------
+# ---------------------- CONFIGURAÇÕES GERAIS ----------------------
 PASTA_PROGRAMA = os.path.dirname(os.path.abspath(__file__))
-CAMINHO_LOGO = os.path.join(PASTA_PROGRAMA, "logo_empresa.png")
+LOGO = os.path.join(PASTA_PROGRAMA, "logo_empresa.png")
 
 DADOS_EMPRESA = {
     "nome": "VR Reservatórios",
     "cnpj": "13.343.741/0001-90",
     "endereco": "R. João Ifanger Júnior, 138 - Indaiatuba/SP",
     "telefone": "(19) 98986-9948",
-    "logo": CAMINHO_LOGO
+    "logo": LOGO
 }
-# -----------------------------------------------------------------------
 
 usuario_logado = ""
-
-# ---------------------- FUNÇÃO PARA VOLTAR À TELA DE LOGIN ----------------------
-def voltar_para_login(janela_atual):
-    janela_atual.destroy()   # Fecha a tela atual
-    tela_login()             # Abre novamente a tela de login
-# -----------------------------------------------------------------------
-
 
 # ---------------------- FUNÇÃO DE FORMATAÇÃO DE VALORES ----------------------
 def formatar_valor(valor):
     return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-# -----------------------------------------------------------------------
 
-# ---------------------- BANCO DE DADOS COM TABELA DE ITENS ----------------------
+# ---------------------- FUNÇÃO PARA VOLTAR À TELA DE LOGIN ----------------------
+def voltar_para_login(janela_atual):
+    janela_atual.destroy()
+    tela_login()
+
+# ---------------------- CONEXÃO E ESTRUTURA DO BANCO DE DADOS ----------------------
 def conectar_db():
     conn = sqlite3.connect("orcamentos.db")
     cursor = conn.cursor()
+
+    # Tabela de usuários
     cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         usuario TEXT UNIQUE NOT NULL,
                         senha TEXT NOT NULL
                     )''')
+
+    # Tabela de clientes
     cursor.execute('''CREATE TABLE IF NOT EXISTS clientes (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         razao_social TEXT NOT NULL,
@@ -56,12 +56,16 @@ def conectar_db():
                         cep TEXT,
                         contato TEXT
                     )''')
+
+    # Tabela de serviços
     cursor.execute('''CREATE TABLE IF NOT EXISTS servicos (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         codigo TEXT UNIQUE,
                         descricao TEXT NOT NULL,
                         valor_unitario REAL NOT NULL
                     )''')
+
+    # Tabela de orçamentos com colunas de parcelamento
     cursor.execute('''CREATE TABLE IF NOT EXISTS orcamentos (
                         numero_orcamento TEXT PRIMARY KEY,
                         data_orcamento TEXT,
@@ -73,9 +77,19 @@ def conectar_db():
                         imposto REAL,
                         total_final REAL,
                         vencimento TEXT,
+                        numero_parcelas INTEGER DEFAULT 1,
+                        valor_parcela REAL DEFAULT 0.0,
                         FOREIGN KEY (id_cliente) REFERENCES clientes(id)
                     )''')
-    # NOVA TABELA: Itens dos orçamentos
+
+    # Adiciona colunas de parcelamento se já existir a tabela antiga
+    try:
+        cursor.execute("ALTER TABLE orcamentos ADD COLUMN numero_parcelas INTEGER DEFAULT 1")
+        cursor.execute("ALTER TABLE orcamentos ADD COLUMN valor_parcela REAL DEFAULT 0.0")
+    except:
+        pass
+
+    # Tabela de itens dos orçamentos
     cursor.execute('''CREATE TABLE IF NOT EXISTS itens_orcamento (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         numero_orcamento TEXT,
@@ -86,18 +100,77 @@ def conectar_db():
                         valor_total REAL,
                         FOREIGN KEY (numero_orcamento) REFERENCES orcamentos(numero_orcamento) ON DELETE CASCADE
                     )''')
+
     # Usuário padrão
     cursor.execute("SELECT * FROM usuarios WHERE usuario = 'admin'")
     if not cursor.fetchone():
         cursor.execute("INSERT INTO usuarios (usuario, senha) VALUES (?, ?)", ("admin", "123456"))
+
     conn.commit()
     return conn
 
 conn = conectar_db()
 
-# ---------------------- TELA ADICIONAR USUÁRIO ----------------------
-def tela_adicionar_usuario():
-    janela = tk.Toplevel()
+# ---------------------- TELA DE LOGIN ----------------------
+def tela_login():
+    global usuario_logado
+    janela_login = tk.Tk()
+    janela_login.title("Acesso ao Sistema de Orçamentos")
+    janela_login.state("zoomed")
+    janela_login.config(bg="#f0f0f0")
+
+    frame_central = ttk.Frame(janela_login, padding=30)
+    frame_central.place(relx=0.5, rely=0.5, anchor="center")
+
+    ttk.Label(frame_central, text="SISTEMA DE ORÇAMENTOS", font=("Arial", 20, "bold")).pack(pady=20)
+    ttk.Label(frame_central, text="Acesso ao Sistema", font=("Arial", 14)).pack(pady=10)
+
+    frame = ttk.Frame(frame_central, padding=20)
+    frame.pack()
+
+    ttk.Label(frame, text="Usuário:", font=("Arial", 12)).grid(row=0, column=0, sticky="w", pady=10)
+    entrada_usuario = ttk.Entry(frame, width=35, font=("Arial", 12))
+    entrada_usuario.grid(row=0, column=1, pady=10, padx=10)
+
+    ttk.Label(frame, text="Senha:", font=("Arial", 12)).grid(row=1, column=0, sticky="w", pady=10)
+    entrada_senha = ttk.Entry(frame, width=35, show="*", font=("Arial", 12))
+    entrada_senha.grid(row=1, column=1, pady=10, padx=10)
+
+    def validar_login():
+        global usuario_logado
+        usuario = entrada_usuario.get().strip()
+        senha = entrada_senha.get().strip()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM usuarios WHERE usuario = ? AND senha = ?", (usuario, senha))
+        if cursor.fetchone():
+            usuario_logado = usuario
+            janela_login.destroy()
+            tela_principal()
+        else:
+            messagebox.showerror("Erro", "Usuário ou senha incorretos!")
+         # ✅ Função de sair corrigida: fecha tudo de uma vez
+    def sair_do_sistema():
+        try:
+            # Fecha conexão com o banco para evitar erros
+            if conn:
+                conn.close()
+        except:
+            pass
+        # Encerra e remove a janela completamente
+        janela_login.quit()
+        janela_login.destroy()
+
+    frame_botoes = ttk.Frame(frame_central)
+    frame_botoes.pack(pady=20)
+    ttk.Button(frame_botoes, text="Entrar", command=validar_login, width=15).grid(row=0, column=0, padx=10)
+    ttk.Button(frame_botoes, text="Adicionar Novo Usuário", command=lambda: tela_adicionar_usuario(janela_login), width=20).grid(row=0, column=1, padx=10)
+    ttk.Button(frame_botoes, text="Sair", command=sair_do_sistema, width=10).grid(row=0, column=2, padx=10)
+
+    janela_login.mainloop()
+
+# ---------------------- ADICIONAR NOVO USUÁRIO ----------------------
+def tela_adicionar_usuario(janela_pai=None):
+    janela = tk.Toplevel(janela_pai)
     janela.title("Cadastrar Novo Usuário")
     janela.geometry("400x220")
     janela.resizable(False, False)
@@ -136,58 +209,11 @@ def tela_adicionar_usuario():
     ttk.Button(frame_botoes, text="Salvar", command=salvar).pack(side="left", padx=10)
     ttk.Button(frame_botoes, text="Cancelar", command=janela.destroy).pack(side="right", padx=10)
 
-# ---------------------- TELA DE LOGIN - MODO JANELA MAXIMIZADA ----------------------
-def tela_login():
-    global usuario_logado
-    janela_login = tk.Tk()
-    janela_login.title("Acesso ao Sistema de Orçamentos")
-    janela_login.state("zoomed")  # Abre maximizada, não tela cheia
-    janela_login.config(bg="#f0f0f0")
-
-    frame_central = ttk.Frame(janela_login, padding=30)
-    frame_central.place(relx=0.5, rely=0.5, anchor="center")
-
-    ttk.Label(frame_central, text="SISTEMA DE ORÇAMENTOS", font=("Arial", 20, "bold")).pack(pady=20)
-    ttk.Label(frame_central, text="Acesso ao Sistema", font=("Arial", 14)).pack(pady=10)
-
-    frame = ttk.Frame(frame_central, padding=20)
-    frame.pack()
-
-    ttk.Label(frame, text="Usuário:", font=("Arial", 12)).grid(row=0, column=0, sticky="w", pady=10)
-    entrada_usuario = ttk.Entry(frame, width=35, font=("Arial", 12))
-    entrada_usuario.grid(row=0, column=1, pady=10, padx=10)
-
-    ttk.Label(frame, text="Senha:", font=("Arial", 12)).grid(row=1, column=0, sticky="w", pady=10)
-    entrada_senha = ttk.Entry(frame, width=35, show="*", font=("Arial", 12))
-    entrada_senha.grid(row=1, column=1, pady=10, padx=10)
-
-    def validar_login():
-        global usuario_logado
-        usuario = entrada_usuario.get().strip()
-        senha = entrada_senha.get().strip()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM usuarios WHERE usuario = ? AND senha = ?", (usuario, senha))
-        if cursor.fetchone():
-            usuario_logado = usuario
-            janela_login.destroy()
-            tela_principal()
-        else:
-            messagebox.showerror("Erro", "Usuário ou senha incorretos!")
-
-    frame_botoes = ttk.Frame(frame_central)
-    frame_botoes.pack(pady=20)
-
-    ttk.Button(frame_botoes, text="Entrar", command=validar_login, width=15).grid(row=0, column=0, padx=10)
-    ttk.Button(frame_botoes, text="Adicionar Novo Usuário", command=tela_adicionar_usuario, width=20).grid(row=0, column=1, padx=10)
-    ttk.Button(frame_botoes, text="Sair", command=janela_login.quit, width=10).grid(row=0, column=2, padx=10)
-
-    janela_login.mainloop()
-
-# ---------------------- TELA PRINCIPAL - MAXIMIZADA ----------------------
+# ---------------------- TELA PRINCIPAL ----------------------
 def tela_principal():
     janela = tk.Tk()
     janela.title(f"Sistema de Orçamentos - VR Reservatórios | Usuário: {usuario_logado}")
-    janela.state("zoomed")  # Janela aberta no tamanho total da tela
+    janela.state("zoomed")
     menu_bar = tk.Menu(janela)
     janela.config(menu=menu_bar)
 
@@ -205,8 +231,7 @@ def tela_principal():
     ttk.Label(janela, text="Sistema de Gestão de Orçamentos", font=("Arial", 22, "bold")).pack(pady=60)
     ttk.Label(janela, text=f"Usuário logado: {usuario_logado}", font=("Arial", 14, "italic")).pack(pady=10)
     ttk.Label(janela, text="Selecione uma opção no menu acima para começar", font=("Arial", 14)).pack(pady=30)
-    
-    # Botão alterado para voltar ao login ao invés de fechar o programa
+
     ttk.Button(janela, text="Sair do Sistema", command=lambda: voltar_para_login(janela)).pack(pady=20)
 
     janela.mainloop()
@@ -336,6 +361,7 @@ def tela_cadastro_clientes():
     janela.geometry("750x550")
     frame_form = ttk.LabelFrame(janela, text="Dados do Cliente", padding=15)
     frame_form.pack(fill="x", padx=10, pady=5)
+
     campos = {}
     labels = [
         ("Razão Social:", "razao"), ("CNPJ/CPF:", "cnpj"), ("IE/RG:", "ie"),
@@ -348,6 +374,7 @@ def tela_cadastro_clientes():
         ttk.Label(frame_form, text=texto).grid(row=linha, column=coluna, sticky="w", pady=5, padx=5)
         campos[chave] = ttk.Entry(frame_form, width=35)
         campos[chave].grid(row=linha, column=coluna + 1, padx=5, pady=5)
+
     id_cliente_selecionado = None
 
     def limpar_campos():
@@ -469,13 +496,16 @@ def tela_cadastro_servicos():
     janela.geometry("700x450")
     frame_form = ttk.LabelFrame(janela, text="Dados do Serviço", padding=15)
     frame_form.pack(fill="x", padx=10, pady=5)
+
     id_servico_selecionado = None
     ttk.Label(frame_form, text="Código:").grid(row=0, column=0, sticky="w", pady=8, padx=5)
     entrada_cod = ttk.Entry(frame_form, width=20)
     entrada_cod.grid(row=0, column=1, padx=5)
+
     ttk.Label(frame_form, text="Descrição do Serviço:").grid(row=0, column=2, sticky="w", pady=8, padx=15)
     entrada_desc = ttk.Entry(frame_form, width=45)
     entrada_desc.grid(row=0, column=3, padx=5)
+
     ttk.Label(frame_form, text="Valor Unitário R$:").grid(row=1, column=0, sticky="w", pady=8, padx=5)
     entrada_valor = ttk.Entry(frame_form, width=20)
     entrada_valor.grid(row=1, column=1, padx=5)
@@ -511,7 +541,7 @@ def tela_cadastro_servicos():
             entrada_desc.delete(0, tk.END)
             entrada_desc.insert(0, dados[3])
             entrada_valor.delete(0, tk.END)
-            entrada_valor.insert(0, f"{dados[4]:.2f}")
+            entrada_valor.insert(0, f"{dados[4]:.2f}".replace(".", ","))
 
     def salvar_servico():
         cod = entrada_cod.get().strip()
@@ -612,7 +642,7 @@ def gerar_pdf(dados_orcamento, itens):
     c.drawString(7*cm, altura - 4*cm, f"Telefone: {DADOS_EMPRESA['telefone']}")
 
     c.setFont("Helvetica-Bold", 12)
-    c.drawRightString(largura - 2*cm, altura - 2*cm, f"Pedido de Venda Nº {dados_orcamento['numero']}")
+    c.drawRightString(largura - 2*cm, altura - 2*cm, f"Orçamento Nº {dados_orcamento['numero']}")
     c.drawRightString(largura - 2*cm, altura - 2.8*cm, f"Data: {dados_orcamento['data']}")
 
     c.setFont("Helvetica-Bold", 11)
@@ -653,10 +683,26 @@ def gerar_pdf(dados_orcamento, itens):
     y_pos -= 0.6*cm
     c.drawRightString(largura - 2*cm, y_pos, f"Imposto: {formatar_valor(dados_orcamento['imposto'])}")
     y_pos -= 0.6*cm
-    c.drawRightString(largura - 2*cm, y_pos, f"Total do Pedido: {formatar_valor(dados_orcamento['total_final'])}")
+    c.drawRightString(largura - 2*cm, y_pos, f"Total do Orçamento: {formatar_valor(dados_orcamento['total_final'])}")
 
-    y_pos -= 1*cm
-    c.drawString(2*cm, y_pos, f"Vencimento: {dados_orcamento['vencimento']}")
+    # ---------------------- EXIBIÇÃO DAS PARCELAS COM DATAS ----------------------
+    y_pos -= 1.2*cm
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(2*cm, y_pos, "Condições de Pagamento:")
+    y_pos -= 0.7*cm
+    c.setFont("Helvetica", 9)
+    for parcela in dados_orcamento.get("parcelas", []):
+        c.drawString(2.5*cm, y_pos, f"Parcela {parcela['numero']}: {formatar_valor(parcela['valor'])} - Vencimento: {parcela['data']}")
+        y_pos -= 0.6*cm
+    # --------------------------------------------------------------------------------
+
+    # ---------------------- ESPAÇO PARA ASSINATURA ----------------------
+    y_pos -= 2.5*cm
+    c.setFont("Helvetica", 10)
+    c.drawCentredString(largura/2, y_pos, "_________________________________________________")
+    y_pos -= 0.6*cm
+    c.drawCentredString(largura/2, y_pos, "Assinatura e Carimbo")
+    # ----------------------------------------------------------------------
 
     c.save()
     messagebox.showinfo("PDF Salvo", f"Orçamento salvo com sucesso em:\n{caminho_arquivo}")
@@ -697,6 +743,17 @@ def tela_novo_orcamento():
     entrada_venc.grid(row=2, column=1)
     entrada_venc.insert(0, "28 dias")
 
+    # ---------------------- CAMPOS DE PARCELAMENTO ----------------------
+    ttk.Label(frame_dados, text="Número de Parcelas:").grid(row=3, column=0, sticky="w", padx=5, pady=8)
+    entrada_parcelas = ttk.Entry(frame_dados, width=15)
+    entrada_parcelas.insert(0, "1")  # Padrão: à vista
+    entrada_parcelas.grid(row=3, column=1)
+
+    ttk.Label(frame_dados, text="Valor por Parcela:").grid(row=3, column=2, sticky="w", padx=15)
+    label_valor_parcela = ttk.Label(frame_dados, text="R$ 0,00", font=("Arial", 10, "bold"))
+    label_valor_parcela.grid(row=3, column=3)
+    # ----------------------------------------------------------------------
+
     frame_itens = ttk.LabelFrame(janela, text="Serviços", padding=10)
     frame_itens.pack(fill="both", expand=True, padx=10, pady=5)
 
@@ -712,16 +769,6 @@ def tela_novo_orcamento():
     entrada_qtd.insert(0, "1")
     entrada_qtd.grid(row=0, column=3)
 
-    # ---------------------- CAMPOS DE PARCELAMENTO ----------------------
-    ttk.Label(frame_dados, text="Número de Parcelas:").grid(row=3, column=0, sticky="w", padx=5, pady=8)
-    entrada_parcelas = ttk.Entry(frame_dados, width=15)
-    entrada_parcelas.insert(0, "1")  # Padrão: à vista
-    entrada_parcelas.grid(row=3, column=1)
-
-    ttk.Label(frame_dados, text="Valor por Parcela:").grid(row=3, column=2, sticky="w", padx=15)
-    label_valor_parcela = ttk.Label(frame_dados, text="R$ 0,00", font=("Arial", 10, "bold"))
-    label_valor_parcela.grid(row=3, column=3)
-    # ----------------------------------------------------------------------
     lista_itens = []
     colunas = ("codigo", "descricao", "valor", "qtd", "total")
     tree = ttk.Treeview(frame_itens, columns=colunas, show="headings", height=7)
@@ -756,6 +803,7 @@ def tela_novo_orcamento():
         item = {"codigo": cod, "descricao": desc, "valor": val, "qtd": qtd, "total": total}
         lista_itens.append(item)
         tree.insert("", "end", values=(cod, desc, formatar_valor(val), qtd, formatar_valor(total)))
+        calcular_parcelas()
 
     def remover_item():
         selecionado = tree.selection()
@@ -765,6 +813,7 @@ def tela_novo_orcamento():
         indice = tree.index(selecionado[0])
         tree.delete(selecionado[0])
         del lista_itens[indice]
+        calcular_parcelas()
 
     frame_botoes_item = ttk.Frame(frame_itens)
     frame_botoes_item.grid(row=0, column=4, padx=10)
@@ -782,7 +831,62 @@ def tela_novo_orcamento():
     entrada_imp.insert(0, "0,00")
     entrada_imp.grid(row=0, column=3)
 
-    
+    # ---------------------- FUNÇÃO DE CÁLCULO DAS PARCELAS ----------------------
+    lista_parcelas = []
+
+    def calcular_parcelas():
+        nonlocal lista_parcelas
+        lista_parcelas = []
+        try:
+            num_parcelas = int(entrada_parcelas.get().strip())
+            if num_parcelas < 1:
+                raise ValueError
+        except:
+            label_valor_parcela.config(text="Inválido")
+            return
+
+        if not lista_itens:
+            total_final = 0.0
+        else:
+            total_bruto = sum(i["total"] for i in lista_itens)
+            try:
+                desc = float(entrada_desc.get().replace(",", ".")) if entrada_desc.get().strip() else 0.0
+                imp = float(entrada_imp.get().replace(",", ".")) if entrada_imp.get().strip() else 0.0
+                if desc < 0 or imp < 0:
+                    raise ValueError
+            except:
+                desc = 0.0
+                imp = 0.0
+            total_final = round(total_bruto - desc + imp, 2)
+
+        if total_final <= 0:
+            label_valor_parcela.config(text="R$ 0,00")
+            return
+
+        valor_parcela = round(total_final / num_parcelas, 2)
+        label_valor_parcela.config(text=formatar_valor(valor_parcela))
+
+        # Calcula as datas com base no prazo de vencimento informado
+        try:
+            prazo_dias = int(''.join(filter(str.isdigit, entrada_venc.get())))
+        except:
+            prazo_dias = 28  # padrão se não conseguir extrair
+
+        data_primeiro_venc = datetime.now() + timedelta(days=prazo_dias)
+        for i in range(num_parcelas):
+            data = data_primeiro_venc + timedelta(days=prazo_dias * i)
+            lista_parcelas.append({
+                "numero": i + 1,
+                "valor": valor_parcela,
+                "data": data.strftime("%d/%m/%Y")
+            })
+
+    # Atualiza cálculo automaticamente
+    entrada_parcelas.bind("<KeyRelease>", lambda e: calcular_parcelas())
+    entrada_venc.bind("<KeyRelease>", lambda e: calcular_parcelas())
+    entrada_desc.bind("<KeyRelease>", lambda e: calcular_parcelas())
+    entrada_imp.bind("<KeyRelease>", lambda e: calcular_parcelas())
+    # --------------------------------------------------------------------------------
 
     def finalizar_orcamento():
         if not lista_itens or not combo_cliente.get():
@@ -796,18 +900,25 @@ def tela_novo_orcamento():
         except:
             messagebox.showwarning("Aviso", "Valores de desconto e imposto devem ser números positivos!")
             return
+
         total_bruto = sum(i["total"] for i in lista_itens)
-        total_final = total_bruto - desc + imp
+        total_final = round(total_bruto - desc + imp, 2)
         id_cliente = int(combo_cliente.get().split(" - ")[0])
         cursor.execute("SELECT * FROM clientes WHERE id = ?", (id_cliente,))
         dados_cli = cursor.fetchone()
+
         dados_pdf = {
             "numero": entrada_num.get(),
             "data": datetime.now().strftime("%d/%m/%Y"),
             "cliente": {
-                "razao": dados_cli[1], "cnpj": dados_cli[2] or "Não informado", "end": dados_cli[4] or "",
-                "num": dados_cli[5] or "", "bairro": dados_cli[6] or "", "cidade": dados_cli[7] or "",
-                "uf": dados_cli[8] or "", "cep": dados_cli[9] or ""
+                "razao": dados_cli[1], 
+                "cnpj": dados_cli[2] or "Não informado", 
+                "end": dados_cli[4] or "",
+                "num": dados_cli[5] or "", 
+                "bairro": dados_cli[6] or "", 
+                "cidade": dados_cli[7] or "",
+                "uf": dados_cli[8] or "", 
+                "cep": dados_cli[9] or ""
             },
             "vendedor": entrada_vend.get(),
             "profundidade": entrada_prof.get() or "0",
@@ -815,11 +926,14 @@ def tela_novo_orcamento():
             "desconto": desc,
             "imposto": imp,
             "total_final": total_final,
-            "vencimento": entrada_venc.get()
+            "vencimento": entrada_venc.get(),
+            "parcelas": lista_parcelas.copy()  # Envia lista de parcelas com datas
         }
+
         gerar_pdf(dados_pdf, lista_itens)
+
         try:
-            # Salva dados do orçamento
+            # Salva dados do orçamento — mantendo sua estrutura original
             cursor.execute('''INSERT INTO orcamentos VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                            (entrada_num.get(), dados_pdf["data"], id_cliente, entrada_vend.get(), entrada_prof.get(),
                             total_bruto, desc, imp, total_final, entrada_venc.get()))
@@ -835,6 +949,9 @@ def tela_novo_orcamento():
             messagebox.showerror("Erro", f"Falha ao salvar orçamento: {e}")
 
     ttk.Button(frame_totais, text="Gerar Orçamento e Salvar", command=finalizar_orcamento).grid(row=0, column=4, padx=30)
+
+    # Calcula parcelas ao abrir a tela
+    calcular_parcelas()
 
 # ---------------------- HISTÓRICO - CARREGA ITENS AUTOMATICAMENTE ----------------------
 def tela_historico_orcamentos():
